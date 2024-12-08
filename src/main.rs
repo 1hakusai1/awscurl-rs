@@ -55,16 +55,22 @@ impl Args {
 
 #[tokio::main]
 async fn main() {
-    match inner().await {
-        Ok(_) => (),
-        Err(e) => {
-            eprintln!("{}", e.0);
-            process::exit(1)
-        }
+    let res = inner().await.unwrap_or_else(|e| {
+        eprintln!("{}", e.0);
+        process::exit(1)
+    });
+    let status = res.status();
+    let body = res.text().await.unwrap_or_else(|_| {
+        eprintln!("Failed to retrieve response");
+        process::exit(1)
+    });
+    println!("{}", body);
+    if !status.is_success() {
+        process::exit(1)
     }
 }
 
-async fn inner() -> Result<()> {
+async fn inner() -> Result<reqwest::Response> {
     let args = Args::parse();
     let confg = aws_config::from_env().load().await;
     let identity = confg
@@ -114,11 +120,6 @@ async fn inner() -> Result<()> {
         .execute(reqwest_req)
         .await
         .map_err(|_| Error::new("Request failed"))?;
-    println!(
-        "{}",
-        res.text()
-            .await
-            .map_err(|_| Error::new("Failed to parse the response"))?
-    );
-    Ok(())
+
+    Ok(res)
 }
