@@ -73,7 +73,12 @@ async fn inner() -> Result<()> {
         .identity(&identity)
         .time(SystemTime::now())
         .settings(singing_settings)
-        .region(confg.region().ok_or(Error("".to_string()))?.as_ref())
+        .region(
+            confg
+                .region()
+                .ok_or(Error("Unable to decide region".to_string()))?
+                .as_ref(),
+        )
         .name("execute-api")
         .build()
         .map_err(|_| Error("Unable to build signing params".to_string()))?
