@@ -2,6 +2,13 @@
 
 Implementation of [awscurl](https://github.com/okigan/awscurl) written in Rust.
 
+## Installation
+
+```
+brew tap 1hakusai1/1hakusai1
+brew install awscurl-rs
+```
+
 ## Usage
 
 ```
