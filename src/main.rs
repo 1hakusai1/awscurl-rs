@@ -100,9 +100,7 @@ async fn inner() -> Result<reqwest::Response> {
         .build()
         .map_err(|_| Error::new("Unable to build signing params"))?
         .into();
-    let mut unsigned_request = args
-        .build_unsigned_request()
-        .map_err(|_| Error::new("Failed to build request"))?;
+    let mut unsigned_request = args.build_unsigned_request()?;
     let signable_request = SignableRequest::new(
         unsigned_request.method().as_str(),
         unsigned_request.uri().to_string(),
