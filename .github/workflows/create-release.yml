@@ -1,0 +1,30 @@
+name: Create Release and Upload Package
+
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  release:
+    runs-on: macos-14-large
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup Rust, Cargo
+      uses: moonrepo/setup-rust@v1
+      with:
+        channel: "1.81.0"
+    - name: Check Environment
+      run: |
+        rustc --version
+        cargo --version
+    - name: Build Package
+      run: |
+        cargo build --release
+        cp target/release/awscurl ./
+        zip awscurlrs_${{ github.ref_name }}_darwin_arm64.zip awscurl
+    - name: Create Release
+      run: |
+        gh release create ${{ github.ref_name }} awscurlrs_${{ github.ref_name }}_darwin_arm64.zip --generate-notes
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
