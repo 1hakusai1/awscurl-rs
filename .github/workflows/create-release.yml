@@ -22,9 +22,9 @@ jobs:
       run: |
         cargo build --release
         cp target/release/awscurl ./
-        zip awscurlrs_${{ github.ref_name }}_darwin_arm64.zip awscurl
+        zip awscurl-rs_${{ github.ref_name }}_darwin_arm64.zip awscurl
     - name: Create Release
       run: |
-        gh release create ${{ github.ref_name }} awscurlrs_${{ github.ref_name }}_darwin_arm64.zip --generate-notes
+        gh release create ${{ github.ref_name }} awscurl-rs_${{ github.ref_name }}_darwin_arm64.zip --generate-notes
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
