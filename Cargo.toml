@@ -15,3 +15,7 @@ clap = { version = "4.5.23", features = ["derive"] }
 http = "1.2.0"
 reqwest = "0.12.9"
 tokio = { version = "1.42.0", features = ["full"] }
+
+[profile.release]
+strip = true 
+lto = true
