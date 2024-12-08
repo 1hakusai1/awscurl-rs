@@ -45,9 +45,14 @@ impl Args {
             };
             builder = builder.header(key, value);
         }
+        let method = match (self.method.clone(), self.data.clone()) {
+            (Some(method), _) => method,
+            (None, Some(_)) => "POST".to_string(),
+            (None, None) => "GET".to_string(),
+        };
         builder
             .uri(self.url.clone())
-            .method(self.method.clone().unwrap_or("GET".to_string()).as_bytes())
+            .method(method.as_bytes())
             .body(self.data.clone().unwrap_or("".to_string()))
             .map_err(|_| Error::new("Failed to build request"))
     }
