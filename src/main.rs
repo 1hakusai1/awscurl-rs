@@ -22,6 +22,7 @@ impl Error {
 type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Parser, Debug)]
+#[command(version)]
 struct Args {
     url: String,
 
