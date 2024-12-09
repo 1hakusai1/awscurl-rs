@@ -8,6 +8,7 @@ name = "awscurl"
 path = "src/main.rs"
 
 [dependencies]
+anyhow = "1.0.94"
 aws-config = { version = "1.5.10", features = ["behavior-version-latest"] }
 aws-credential-types = "1.2.1"
 aws-sigv4 = "1.2.6"

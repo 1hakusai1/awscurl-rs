@@ -3,23 +3,13 @@ use std::{
     time::SystemTime,
 };
 
+use anyhow::Context;
 use aws_credential_types::provider::ProvideCredentials;
 use aws_sigv4::{
     http_request::{sign, SignableBody, SignableRequest, SigningSettings},
     sign::v4,
 };
 use clap::Parser;
-
-#[derive(Debug)]
-struct Error(String);
-
-impl Error {
-    fn new(message: &str) -> Self {
-        Error(message.to_string())
-    }
-}
-
-type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Parser, Debug)]
 #[command(version)]
@@ -40,12 +30,12 @@ struct Args {
 }
 
 impl Args {
-    fn build_unsigned_request(&self) -> Result<http::Request<String>> {
+    fn build_unsigned_request(&self) -> anyhow::Result<http::Request<String>> {
         let mut builder = http::Request::builder();
         for raw_string in self.header.iter() {
             let (key, value) = match raw_string.split_once(":") {
                 Some(pair) => pair,
-                None => return Err(Error::new(&format!("Invalid header: {}", raw_string))),
+                None => return Err(anyhow::anyhow!(format!("Invalid header: {}", raw_string))),
             };
             builder = builder.header(key, value);
         }
@@ -54,18 +44,18 @@ impl Args {
             (None, Some(_)) => "POST".to_string(),
             (None, None) => "GET".to_string(),
         };
-        builder
+        let req = builder
             .uri(self.url.clone())
             .method(method.as_bytes())
-            .body(self.data.clone().unwrap_or("".to_string()))
-            .map_err(|_| Error::new("Failed to build request"))
+            .body(self.data.clone().unwrap_or("".to_string()))?;
+        Ok(req)
     }
 }
 
 #[tokio::main]
 async fn main() {
     let status = inner().await.unwrap_or_else(|e| {
-        eprintln!("{}", e.0);
+        eprintln!("{:?}", e);
         process::exit(1)
     });
     if !status.is_success() {
@@ -73,30 +63,23 @@ async fn main() {
     }
 }
 
-async fn inner() -> Result<http::StatusCode> {
+async fn inner() -> anyhow::Result<http::StatusCode> {
     let args = Args::parse();
     let confg = aws_config::from_env().load().await;
     let identity = confg
         .credentials_provider()
-        .ok_or(Error::new("Unable to find credentials"))?
+        .context("Unable to find credentials")?
         .provide_credentials()
-        .await
-        .map_err(|_| Error::new("Unable to retrieve credentials"))?
+        .await?
         .into();
     let singing_settings = SigningSettings::default();
     let signing_params = v4::SigningParams::builder()
         .identity(&identity)
         .time(SystemTime::now())
         .settings(singing_settings)
-        .region(
-            confg
-                .region()
-                .ok_or(Error::new("Unable to decide region"))?
-                .as_ref(),
-        )
+        .region(confg.region().context("Unable to decide region")?.as_ref())
         .name("execute-api")
-        .build()
-        .map_err(|_| Error::new("Unable to build signing params"))?
+        .build()?
         .into();
     let mut unsigned_request = args.build_unsigned_request()?;
     let signable_request = SignableRequest::new(
@@ -107,33 +90,22 @@ async fn inner() -> Result<http::StatusCode> {
             .iter()
             .map(|(k, v)| (k.as_str(), std::str::from_utf8(v.as_bytes()).unwrap())),
         SignableBody::Bytes(unsigned_request.body().as_bytes()),
-    )
-    .map_err(|_| Error::new("Unable to build singing a request"))?;
-    let (instruction, _signature) = sign(signable_request, &signing_params)
-        .map_err(|_| Error::new("Unable to sign the request"))?
-        .into_parts();
+    )?;
+    let (instruction, _signature) = sign(signable_request, &signing_params)?.into_parts();
 
     instruction.apply_to_request_http1x(&mut unsigned_request);
-    let reqwest_req: reqwest::Request = unsigned_request
-        .try_into()
-        .map_err(|_| Error::new("Unable to build a request"))?;
+    let reqwest_req: reqwest::Request = unsigned_request.try_into()?;
     if args.verbose {
         print_request_verbose(&reqwest_req);
     }
 
-    let res = reqwest::Client::new()
-        .execute(reqwest_req)
-        .await
-        .map_err(|_| Error::new("Request failed"))?;
+    let res = reqwest::Client::new().execute(reqwest_req).await?;
     if args.verbose {
         print_response_verbose(&res);
     }
 
     let status = res.status();
-    let body = res
-        .text()
-        .await
-        .map_err(|_| Error::new("Failed to retrieve response"))?;
+    let body = res.text().await?;
     println!("{}", body);
     Ok(status)
 }
