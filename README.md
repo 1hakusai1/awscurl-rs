@@ -24,17 +24,13 @@ cargo install
 ### Use profile
 
 ```
-export AWS_PROFILE=your-profile
-awscurl https://example.com
+AWS_PROFILE=your-profile awscurl https://example.com
 ```
 
 ### Use access key
 
 ```
-export AWS_ACCESS_KEY_ID=YOURACCESSKEYID
-export AWS_SECRET_ACCESS_KEY=your/accesskey
-export AWS_DEFAULT_REGION=ap-northeast-1
-awscurl https://example.com
+AWS_ACCESS_KEY_ID=YOURACCESSKEYID AWS_SECRET_ACCESS_KEY=your/accesskey AWS_DEFAULT_REGION=ap-northeast-1 awscurl https://example.com
 ```
 
 ### Assume role
@@ -52,8 +48,7 @@ source_profile = source-profile-name
 ```
 
 ```
-export AWS_PROFILE=assume-role-profile
-awscurl https://example.com
+AWS_PROFILE=assume-role-profile awscurl https://example.com
 ```
 
 ## Example
