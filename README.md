@@ -37,6 +37,25 @@ export AWS_DEFAULT_REGION=ap-northeast-1
 awscurl https://example.com
 ```
 
+### Assume role
+
+Config file
+
+```
+[profile source-profile-name]
+region = ap-northeast-1
+
+[profile assume-role-profile]
+region = ap-northeast-1
+role_arn = arn:aws:iam::000000000000:role/role-name
+source_profile = source-profile-name
+```
+
+```
+export AWS_PROFILE=assume-role-profile
+awscurl https://example.com
+```
+
 ## Example
 
 Most of the options are the same as those in curl.
