@@ -27,6 +27,9 @@ struct Args {
 
     #[arg(short, long)]
     verbose: bool,
+
+    #[arg(short, long)]
+    service: Option<String>,
 }
 
 impl Args {
@@ -73,12 +76,13 @@ async fn inner() -> anyhow::Result<http::StatusCode> {
         .await?
         .into();
     let singing_settings = SigningSettings::default();
+    let service = args.service.clone().unwrap_or("execute-api".to_string());
     let signing_params = v4::SigningParams::builder()
         .identity(&identity)
         .time(SystemTime::now())
         .settings(singing_settings)
         .region(confg.region().context("Unable to decide region")?.as_ref())
-        .name("execute-api")
+        .name(&service)
         .build()?
         .into();
     let mut unsigned_request = args.build_unsigned_request()?;
