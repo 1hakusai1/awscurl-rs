@@ -34,6 +34,9 @@ struct Args {
 
     #[arg(short = 'H', long)]
     header: Vec<String>,
+
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 impl Args {
@@ -120,10 +123,38 @@ async fn inner() -> Result<reqwest::Response> {
     let reqwest_req: reqwest::Request = unsigned_request
         .try_into()
         .map_err(|_| Error::new("Unable to build a request"))?;
+    if args.verbose {
+        print_request_verbose(&reqwest_req);
+    }
+
     let res = reqwest::Client::new()
         .execute(reqwest_req)
         .await
         .map_err(|_| Error::new("Request failed"))?;
+    if args.verbose {
+        print_response_verbose(&res);
+    }
 
     Ok(res)
+}
+
+fn print_request_verbose(req: &reqwest::Request) {
+    eprintln!(
+        "> {} {} {:?}",
+        req.method().as_str(),
+        req.url().path(),
+        req.version()
+    );
+    for (key, value) in req.headers() {
+        eprintln!("> {} {}", key.as_str(), value.to_str().unwrap())
+    }
+    eprintln!(">");
+}
+
+fn print_response_verbose(res: &reqwest::Response) {
+    eprintln!("< {:?} {}", res.version(), res.status().as_str());
+    for (key, value) in res.headers() {
+        eprintln!("< {} {}", key.as_str(), value.to_str().unwrap())
+    }
+    eprintln!("<");
 }
