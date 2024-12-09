@@ -11,10 +11,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Setup Rust, Cargo
-      uses: moonrepo/setup-rust@v1
+      uses: dtolnay/rust-toolchain@stable
       with:
-        channel: "1.81.0"
-        cache: false
+        toolchain: "1.81.0"
     - name: Check Environment
       run: |
         rustc --version
