@@ -30,6 +30,9 @@ struct Args {
 
     #[arg(short, long)]
     service: Option<String>,
+
+    #[arg(short, long)]
+    region: Option<String>,
 }
 
 impl Args {
@@ -77,11 +80,16 @@ async fn inner() -> anyhow::Result<http::StatusCode> {
         .into();
     let singing_settings = SigningSettings::default();
     let service = args.service.clone().unwrap_or("execute-api".to_string());
+    let region = args
+        .region
+        .clone()
+        .or(confg.region().map(|r| r.to_string()))
+        .context("Unable to decide region")?;
     let signing_params = v4::SigningParams::builder()
         .identity(&identity)
         .time(SystemTime::now())
         .settings(singing_settings)
-        .region(confg.region().context("Unable to decide region")?.as_ref())
+        .region(&region)
         .name(&service)
         .build()?
         .into();
