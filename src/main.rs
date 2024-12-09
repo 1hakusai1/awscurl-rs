@@ -33,6 +33,9 @@ struct Args {
 
     #[arg(long)]
     region: Option<String>,
+
+    #[arg(long)]
+    profile: Option<String>,
 }
 
 impl Args {
@@ -71,7 +74,11 @@ async fn main() {
 
 async fn inner() -> anyhow::Result<http::StatusCode> {
     let args = Args::parse();
-    let confg = aws_config::from_env().load().await;
+    let mut config_loader = aws_config::from_env();
+    if let Some(profile) = &args.profile {
+        config_loader = config_loader.profile_name(profile);
+    }
+    let confg = config_loader.load().await;
     let identity = confg
         .credentials_provider()
         .context("Unable to find credentials")?
