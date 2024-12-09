@@ -17,25 +17,31 @@ struct Args {
     url: String,
 
     #[arg(short, long)]
+    /// Request body
     data: Option<String>,
 
     #[arg(short = 'X', long = "request")]
+    /// HTTP method (Ex. GET, POST, PUT ...)
     method: Option<String>,
 
     #[arg(short = 'H', long)]
+    /// HTTP headers (Ex. content-type: application/json)
     header: Vec<String>,
 
-    #[arg(short, long)]
-    verbose: bool,
-
     #[arg(long)]
+    /// AWS service name (Default: execute-api)
     service: Option<String>,
 
     #[arg(long)]
+    /// AWS region
     region: Option<String>,
 
     #[arg(long)]
+    /// AWS profile
     profile: Option<String>,
+
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 impl Args {
