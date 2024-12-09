@@ -28,10 +28,10 @@ struct Args {
     #[arg(short, long)]
     verbose: bool,
 
-    #[arg(short, long)]
+    #[arg(long)]
     service: Option<String>,
 
-    #[arg(short, long)]
+    #[arg(long)]
     region: Option<String>,
 }
 
