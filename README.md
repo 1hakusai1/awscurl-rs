@@ -37,7 +37,7 @@ AWS_ACCESS_KEY_ID=YOURACCESSKEYID AWS_SECRET_ACCESS_KEY=your/accesskey AWS_DEFAU
 
 ### Assume role
 
-```toml
+```
 [profile source-profile-name]
 region = ap-northeast-1
 
