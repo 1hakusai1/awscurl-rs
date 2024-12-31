@@ -61,9 +61,13 @@ impl AwsCurlParam {
         self.args.service.as_deref().unwrap_or(DEFAULT_SERVICE)
     }
 
-    fn region(&self) -> Option<&str> {
+    fn region(&self) -> anyhow::Result<&str> {
         let config_region = self.config.region().map(|r| r.as_ref());
-        self.args.region.as_deref().or(config_region)
+        self.args
+            .region
+            .as_deref()
+            .or(config_region)
+            .context("Unable to decide region")
     }
 
     async fn credentials(&self) -> anyhow::Result<Credentials> {
@@ -104,7 +108,7 @@ impl AwsCurlParam {
             .identity(&identity)
             .time(self.time)
             .settings(SigningSettings::default())
-            .region(self.region().context("Unable to decide region")?)
+            .region(self.region()?)
             .name(self.service())
             .build()?
             .into();
