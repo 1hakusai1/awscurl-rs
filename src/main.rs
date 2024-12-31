@@ -44,29 +44,6 @@ struct Args {
     verbose: bool,
 }
 
-impl Args {
-    fn build_unsigned_request(&self) -> anyhow::Result<http::Request<String>> {
-        let mut builder = http::Request::builder();
-        for raw_string in self.header.iter() {
-            let (key, value) = match raw_string.split_once(":") {
-                Some(pair) => pair,
-                None => return Err(anyhow::anyhow!(format!("Invalid header: {}", raw_string))),
-            };
-            builder = builder.header(key, value);
-        }
-        let method = match (self.method.clone(), self.data.clone()) {
-            (Some(method), _) => method,
-            (None, Some(_)) => "POST".to_string(),
-            (None, None) => "GET".to_string(),
-        };
-        let req = builder
-            .uri(self.url.clone())
-            .method(method.as_bytes())
-            .body(self.data.clone().unwrap_or("".to_string()))?;
-        Ok(req)
-    }
-}
-
 #[tokio::main]
 async fn main() {
     let status = inner().await.unwrap_or_else(|e| {
@@ -106,7 +83,7 @@ async fn inner() -> anyhow::Result<http::StatusCode> {
         .name(&service)
         .build()?
         .into();
-    let mut unsigned_request = args.build_unsigned_request()?;
+    let mut unsigned_request = build_unsigned_request(&args)?;
     let signable_request = SignableRequest::new(
         unsigned_request.method().as_str(),
         unsigned_request.uri().to_string(),
@@ -133,6 +110,27 @@ async fn inner() -> anyhow::Result<http::StatusCode> {
     let body = res.text().await?;
     println!("{}", body);
     Ok(status)
+}
+
+fn build_unsigned_request(args: &Args) -> anyhow::Result<http::Request<String>> {
+    let mut builder = http::Request::builder();
+    for raw_string in args.header.iter() {
+        let (key, value) = match raw_string.split_once(":") {
+            Some(pair) => pair,
+            None => return Err(anyhow::anyhow!(format!("Invalid header: {}", raw_string))),
+        };
+        builder = builder.header(key, value);
+    }
+    let method = match (args.method.clone(), args.data.clone()) {
+        (Some(method), _) => method,
+        (None, Some(_)) => "POST".to_string(),
+        (None, None) => "GET".to_string(),
+    };
+    let req = builder
+        .uri(args.url.clone())
+        .method(method.as_bytes())
+        .body(args.data.clone().unwrap_or("".to_string()))?;
+    Ok(req)
 }
 
 fn print_request_verbose(req: &reqwest::Request) {
