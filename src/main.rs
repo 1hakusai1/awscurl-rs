@@ -216,7 +216,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test() {
+    async fn get_request() {
         let args = Args {
             url: "https://example.com".to_string(),
             data: None,
@@ -256,6 +256,53 @@ mod tests {
             headers: {
                 "x-amz-date": "20130524T000000Z",
                 "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/ap-northeast-1/execute-api/aws4_request, SignedHeaders=host;x-amz-date, Signature=3350cad4e732c60458fd6f31068a90a0179fcc63959c6891ccf3b7788b662c1d",
+            },
+        }
+        "#)
+    }
+
+    #[tokio::test]
+    async fn post_request_with_header() {
+        let args = Args {
+            url: "https://example.com".to_string(),
+            data: Some(r#"{ "hoge": "fuga", "foo": "bar" }"#.to_string()),
+            method: Some("POST".to_string()),
+            header: vec!["content-type: application/json".to_string()],
+            service: None,
+            region: None,
+            profile: None,
+            verbose: false,
+        };
+        let config = generate_config(
+            "AKIAIOSFODNN7EXAMPLE",
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            Some("ap-northeast-1"),
+        );
+        let time = Utc.with_ymd_and_hms(2013, 5, 24, 0, 0, 0).unwrap();
+        let param = AwsCurlParam::new(args, config, time.into());
+        let req = param.build_request().await.unwrap();
+        assert_debug_snapshot!(req, @r#"
+        Request {
+            method: POST,
+            url: Url {
+                scheme: "https",
+                cannot_be_a_base: false,
+                username: "",
+                password: None,
+                host: Some(
+                    Domain(
+                        "example.com",
+                    ),
+                ),
+                port: None,
+                path: "/",
+                query: None,
+                fragment: None,
+            },
+            headers: {
+                "content-type": " application/json",
+                "x-amz-date": "20130524T000000Z",
+                "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/ap-northeast-1/execute-api/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=06cd3bf07213570b40e880f7c72ecded2ce70165134af7fc67a2c5ce21ea8b22",
             },
         }
         "#)
