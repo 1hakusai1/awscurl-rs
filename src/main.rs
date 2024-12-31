@@ -90,7 +90,7 @@ impl AwsCurlParam {
                 Some(pair) => pair,
                 None => bail!("Invalid header: {}", raw_string),
             };
-            ret.insert(key, value);
+            ret.insert(key.trim(), value.trim());
         }
         Ok(ret)
     }
@@ -308,7 +308,7 @@ mod tests {
                 fragment: None,
             },
             headers: {
-                "content-type": " application/json",
+                "content-type": "application/json",
                 "x-amz-date": "20130524T000000Z",
                 "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/ap-northeast-1/execute-api/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=06cd3bf07213570b40e880f7c72ecded2ce70165134af7fc67a2c5ce21ea8b22",
             },
