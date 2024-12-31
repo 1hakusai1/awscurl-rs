@@ -61,8 +61,8 @@ async fn inner() -> anyhow::Result<http::StatusCode> {
     if let Some(profile) = &args.profile {
         config_loader = config_loader.profile_name(profile);
     }
-    let confg = config_loader.load().await;
-    let identity = confg
+    let config = config_loader.load().await;
+    let identity = config
         .credentials_provider()
         .context("Unable to find credentials")?
         .provide_credentials()
@@ -73,7 +73,7 @@ async fn inner() -> anyhow::Result<http::StatusCode> {
     let region = args
         .region
         .clone()
-        .or(confg.region().map(|r| r.to_string()))
+        .or(config.region().map(|r| r.to_string()))
         .context("Unable to decide region")?;
     let signing_params = v4::SigningParams::builder()
         .identity(&identity)
