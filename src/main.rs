@@ -4,7 +4,8 @@ use std::{
 };
 
 use anyhow::Context;
-use aws_credential_types::provider::ProvideCredentials;
+use aws_config::SdkConfig;
+use aws_credential_types::{provider::ProvideCredentials, Credentials};
 use aws_sigv4::{
     http_request::{sign, SignableBody, SignableRequest, SigningSettings},
     sign::v4,
@@ -44,6 +45,86 @@ struct Args {
     verbose: bool,
 }
 
+struct AwsCurlParam {
+    args: Args,
+    config: SdkConfig,
+    time: SystemTime,
+}
+const DEFAULT_SERVICE: &str = "execute-api";
+
+impl AwsCurlParam {
+    fn new(args: Args, config: SdkConfig, time: SystemTime) -> Self {
+        Self { args, config, time }
+    }
+
+    fn service(&self) -> &str {
+        self.args.service.as_deref().unwrap_or(DEFAULT_SERVICE)
+    }
+
+    fn region(&self) -> Option<&str> {
+        let config_region = self.config.region().map(|r| r.as_ref());
+        self.args.region.as_deref().or(config_region)
+    }
+
+    async fn credentials(&self) -> anyhow::Result<Credentials> {
+        let config = self
+            .config
+            .credentials_provider()
+            .context("Unable to find credentials")?
+            .provide_credentials()
+            .await?;
+        Ok(config)
+    }
+
+    async fn build_request(&self) -> anyhow::Result<reqwest::Request> {
+        let identity = self.credentials().await?.into();
+        let signing_params = v4::SigningParams::builder()
+            .identity(&identity)
+            .time(self.time)
+            .settings(SigningSettings::default())
+            .region(self.region().context("Unable to decide region")?)
+            .name(self.service())
+            .build()?
+            .into();
+
+        let mut unsigned_request = {
+            let args: &Args = &self.args;
+            let mut builder = http::Request::builder();
+            for raw_string in args.header.iter() {
+                let (key, value) = match raw_string.split_once(":") {
+                    Some(pair) => pair,
+                    None => return Err(anyhow::anyhow!(format!("Invalid header: {}", raw_string))),
+                };
+                builder = builder.header(key, value);
+            }
+            let method = match (args.method.clone(), args.data.clone()) {
+                (Some(method), _) => method,
+                (None, Some(_)) => "POST".to_string(),
+                (None, None) => "GET".to_string(),
+            };
+            let req = builder
+                .uri(args.url.clone())
+                .method(method.as_bytes())
+                .body(args.data.clone().unwrap_or("".to_string()))?;
+            req
+        };
+        let signable_request = SignableRequest::new(
+            unsigned_request.method().as_str(),
+            unsigned_request.uri().to_string(),
+            unsigned_request
+                .headers()
+                .iter()
+                .map(|(k, v)| (k.as_str(), std::str::from_utf8(v.as_bytes()).unwrap())),
+            SignableBody::Bytes(unsigned_request.body().as_bytes()),
+        )?;
+        let (instruction, _signature) = sign(signable_request, &signing_params)?.into_parts();
+
+        instruction.apply_to_request_http1x(&mut unsigned_request);
+        let reqwest_req: reqwest::Request = unsigned_request.try_into()?;
+        Ok(reqwest_req)
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let status = inner().await.unwrap_or_else(|e| {
@@ -62,47 +143,15 @@ async fn inner() -> anyhow::Result<http::StatusCode> {
         config_loader = config_loader.profile_name(profile);
     }
     let config = config_loader.load().await;
-    let identity = config
-        .credentials_provider()
-        .context("Unable to find credentials")?
-        .provide_credentials()
-        .await?
-        .into();
-    let singing_settings = SigningSettings::default();
-    let service = args.service.clone().unwrap_or("execute-api".to_string());
-    let region = args
-        .region
-        .clone()
-        .or(config.region().map(|r| r.to_string()))
-        .context("Unable to decide region")?;
-    let signing_params = v4::SigningParams::builder()
-        .identity(&identity)
-        .time(SystemTime::now())
-        .settings(singing_settings)
-        .region(&region)
-        .name(&service)
-        .build()?
-        .into();
-    let mut unsigned_request = build_unsigned_request(&args)?;
-    let signable_request = SignableRequest::new(
-        unsigned_request.method().as_str(),
-        unsigned_request.uri().to_string(),
-        unsigned_request
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.as_str(), std::str::from_utf8(v.as_bytes()).unwrap())),
-        SignableBody::Bytes(unsigned_request.body().as_bytes()),
-    )?;
-    let (instruction, _signature) = sign(signable_request, &signing_params)?.into_parts();
+    let param = AwsCurlParam::new(args, config, SystemTime::now());
 
-    instruction.apply_to_request_http1x(&mut unsigned_request);
-    let reqwest_req: reqwest::Request = unsigned_request.try_into()?;
-    if args.verbose {
+    let reqwest_req = param.build_request().await?;
+    if param.args.verbose {
         print_request_verbose(&reqwest_req);
     }
 
     let res = reqwest::Client::new().execute(reqwest_req).await?;
-    if args.verbose {
+    if param.args.verbose {
         print_response_verbose(&res);
     }
 
@@ -110,27 +159,6 @@ async fn inner() -> anyhow::Result<http::StatusCode> {
     let body = res.text().await?;
     println!("{}", body);
     Ok(status)
-}
-
-fn build_unsigned_request(args: &Args) -> anyhow::Result<http::Request<String>> {
-    let mut builder = http::Request::builder();
-    for raw_string in args.header.iter() {
-        let (key, value) = match raw_string.split_once(":") {
-            Some(pair) => pair,
-            None => return Err(anyhow::anyhow!(format!("Invalid header: {}", raw_string))),
-        };
-        builder = builder.header(key, value);
-    }
-    let method = match (args.method.clone(), args.data.clone()) {
-        (Some(method), _) => method,
-        (None, Some(_)) => "POST".to_string(),
-        (None, None) => "GET".to_string(),
-    };
-    let req = builder
-        .uri(args.url.clone())
-        .method(method.as_bytes())
-        .body(args.data.clone().unwrap_or("".to_string()))?;
-    Ok(req)
 }
 
 fn print_request_verbose(req: &reqwest::Request) {
