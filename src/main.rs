@@ -77,6 +77,28 @@ impl AwsCurlParam {
     }
 
     async fn build_request(&self) -> anyhow::Result<reqwest::Request> {
+        let args: &Args = &self.args;
+        let mut builder = http::Request::builder();
+
+        // If the method is not specified and data is specified, POST method is used.
+        // This behavior is same as curl.
+        let method = match (args.method.clone(), args.data.clone()) {
+            (Some(method), _) => method,
+            (None, Some(_)) => "POST".to_string(),
+            (None, None) => "GET".to_string(),
+        };
+        for raw_string in args.header.iter() {
+            let (key, value) = match raw_string.split_once(":") {
+                Some(pair) => pair,
+                None => return Err(anyhow::anyhow!(format!("Invalid header: {}", raw_string))),
+            };
+            builder = builder.header(key, value);
+        }
+        let mut unsigned_request = builder
+            .uri(args.url.clone())
+            .method(method.as_bytes())
+            .body(args.data.clone().unwrap_or("".to_string()))?;
+
         let identity = self.credentials().await?.into();
         let signing_params = v4::SigningParams::builder()
             .identity(&identity)
@@ -86,28 +108,6 @@ impl AwsCurlParam {
             .name(self.service())
             .build()?
             .into();
-
-        let mut unsigned_request = {
-            let args: &Args = &self.args;
-            let mut builder = http::Request::builder();
-            for raw_string in args.header.iter() {
-                let (key, value) = match raw_string.split_once(":") {
-                    Some(pair) => pair,
-                    None => return Err(anyhow::anyhow!(format!("Invalid header: {}", raw_string))),
-                };
-                builder = builder.header(key, value);
-            }
-            let method = match (args.method.clone(), args.data.clone()) {
-                (Some(method), _) => method,
-                (None, Some(_)) => "POST".to_string(),
-                (None, None) => "GET".to_string(),
-            };
-            let req = builder
-                .uri(args.url.clone())
-                .method(method.as_bytes())
-                .body(args.data.clone().unwrap_or("".to_string()))?;
-            req
-        };
         let signable_request = SignableRequest::new(
             unsigned_request.method().as_str(),
             unsigned_request.uri().to_string(),
