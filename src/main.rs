@@ -120,7 +120,7 @@ impl AwsCurlParam {
         let (instruction, _signature) = sign(signable_request, &signing_params)?.into_parts();
 
         instruction.apply_to_request_http1x(&mut unsigned_request);
-        let reqwest_req: reqwest::Request = unsigned_request.try_into()?;
+        let reqwest_req = unsigned_request.try_into()?;
         Ok(reqwest_req)
     }
 }
