@@ -202,6 +202,8 @@ fn print_response_verbose(res: &reqwest::Response) {
 #[cfg(test)]
 mod tests {
 
+    use std::{collections::HashMap, time::SystemTime};
+
     use aws_config::{Region, SdkConfig};
     use aws_credential_types::{provider::SharedCredentialsProvider, Credentials};
     use chrono::{TimeZone, Utc};
@@ -221,6 +223,79 @@ mod tests {
             config_builder = config_builder.region(Region::new(region.to_string()));
         }
         config_builder.build()
+    }
+
+    #[test]
+    fn parse_header() {
+        let args = Args {
+            url: "https://example.com".to_string(),
+            data: None,
+            method: None,
+            header: vec![
+                "content-type: application/json".to_string(),
+                "referer: awscurl-rs".to_string(),
+            ],
+            service: None,
+            region: None,
+            profile: None,
+            verbose: false,
+        };
+        let param = AwsCurlParam::new(args, generate_config("", "", None), SystemTime::now());
+        assert_eq!(
+            param.headers().unwrap(),
+            HashMap::from([
+                ("content-type", "application/json"),
+                ("referer", "awscurl-rs")
+            ])
+        )
+    }
+
+    #[test]
+    fn use_specified_method() {
+        let args = Args {
+            url: "https://example.com".to_string(),
+            data: None,
+            method: Some("PUT".to_string()),
+            header: vec![],
+            service: None,
+            region: None,
+            profile: None,
+            verbose: false,
+        };
+        let param = AwsCurlParam::new(args, generate_config("", "", None), SystemTime::now());
+        assert_eq!(param.method(), "PUT")
+    }
+
+    #[test]
+    fn use_get_method_if_not_specified() {
+        let args = Args {
+            url: "https://example.com".to_string(),
+            data: None,
+            method: None,
+            header: vec![],
+            service: None,
+            region: None,
+            profile: None,
+            verbose: false,
+        };
+        let param = AwsCurlParam::new(args, generate_config("", "", None), SystemTime::now());
+        assert_eq!(param.method(), "GET")
+    }
+
+    #[test]
+    fn use_post_method_if_data_is_specified() {
+        let args = Args {
+            url: "https://example.com".to_string(),
+            data: Some("dummy data".to_string()),
+            method: None,
+            header: vec![],
+            service: None,
+            region: None,
+            profile: None,
+            verbose: false,
+        };
+        let param = AwsCurlParam::new(args, generate_config("", "", None), SystemTime::now());
+        assert_eq!(param.method(), "POST")
     }
 
     #[tokio::test]
