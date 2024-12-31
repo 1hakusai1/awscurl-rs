@@ -181,3 +181,74 @@ fn print_response_verbose(res: &reqwest::Response) {
     }
     eprintln!("<");
 }
+
+#[cfg(test)]
+mod tests {
+
+    use aws_config::{Region, SdkConfig};
+    use aws_credential_types::{provider::SharedCredentialsProvider, Credentials};
+    use chrono::{TimeZone, Utc};
+    use insta::assert_debug_snapshot;
+
+    use crate::{Args, AwsCurlParam};
+
+    fn generate_config(
+        access_key_id: &str,
+        secret_access_key: &str,
+        region: Option<&str>,
+    ) -> SdkConfig {
+        let credentials = Credentials::new(access_key_id, secret_access_key, None, None, "test");
+        let provider = SharedCredentialsProvider::new(credentials);
+        let mut config_builder = SdkConfig::builder().credentials_provider(provider);
+        if let Some(region) = region {
+            config_builder = config_builder.region(Region::new(region.to_string()));
+        }
+        config_builder.build()
+    }
+
+    #[tokio::test]
+    async fn test() {
+        let args = Args {
+            url: "https://example.com".to_string(),
+            data: None,
+            method: None,
+            header: vec![],
+            service: None,
+            region: None,
+            profile: None,
+            verbose: false,
+        };
+        let config = generate_config(
+            "AKIAIOSFODNN7EXAMPLE",
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            Some("ap-northeast-1"),
+        );
+        let time = Utc.with_ymd_and_hms(2013, 5, 24, 0, 0, 0).unwrap();
+        let param = AwsCurlParam::new(args, config, time.into());
+        let req = param.build_request().await.unwrap();
+        assert_debug_snapshot!(req, @r#"
+        Request {
+            method: GET,
+            url: Url {
+                scheme: "https",
+                cannot_be_a_base: false,
+                username: "",
+                password: None,
+                host: Some(
+                    Domain(
+                        "example.com",
+                    ),
+                ),
+                port: None,
+                path: "/",
+                query: None,
+                fragment: None,
+            },
+            headers: {
+                "x-amz-date": "20130524T000000Z",
+                "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/ap-northeast-1/execute-api/aws4_request, SignedHeaders=host;x-amz-date, Signature=3350cad4e732c60458fd6f31068a90a0179fcc63959c6891ccf3b7788b662c1d",
+            },
+        }
+        "#)
+    }
+}
