@@ -1,9 +1,10 @@
 use std::{
+    collections::HashMap,
     process::{self},
     time::SystemTime,
 };
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 use aws_config::SdkConfig;
 use aws_credential_types::{provider::ProvideCredentials, Credentials};
 use aws_sigv4::{
@@ -82,6 +83,18 @@ impl AwsCurlParam {
         }
     }
 
+    fn headers(&self) -> anyhow::Result<HashMap<&str, &str>> {
+        let mut ret = HashMap::new();
+        for raw_string in self.args.header.iter() {
+            let (key, value) = match raw_string.split_once(":") {
+                Some(pair) => pair,
+                None => bail!("Invalid header: {}", raw_string),
+            };
+            ret.insert(key, value);
+        }
+        Ok(ret)
+    }
+
     async fn credentials(&self) -> anyhow::Result<Credentials> {
         let config = self
             .config
@@ -95,12 +108,7 @@ impl AwsCurlParam {
     async fn build_request(&self) -> anyhow::Result<reqwest::Request> {
         let args: &Args = &self.args;
         let mut builder = http::Request::builder();
-
-        for raw_string in args.header.iter() {
-            let (key, value) = match raw_string.split_once(":") {
-                Some(pair) => pair,
-                None => return Err(anyhow::anyhow!(format!("Invalid header: {}", raw_string))),
-            };
+        for (key, value) in self.headers()? {
             builder = builder.header(key, value);
         }
         let mut unsigned_request = builder
