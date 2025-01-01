@@ -415,9 +415,11 @@ dependencies = [
  "aws-sigv4",
  "chrono",
  "clap",
+ "hex",
  "http 1.2.0",
  "insta",
  "reqwest",
+ "sha2",
  "tokio",
 ]
 

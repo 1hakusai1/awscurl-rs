@@ -12,6 +12,7 @@ use aws_sigv4::{
     sign::v4,
 };
 use clap::Parser;
+use sha2::{digest::FixedOutput, Digest, Sha256};
 
 #[derive(Parser, Debug)]
 #[command(version)]
@@ -111,10 +112,16 @@ impl AwsCurlParam {
         for (key, value) in self.headers()? {
             builder = builder.header(key, value);
         }
+
+        // Generate x-amz-content-sha256 header automatically
+        let body = self.args.data.as_deref().unwrap_or("");
+        let body_hash = calc_sha256_hex_digest(body);
+        builder = builder.header("x-amz-content-sha256", body_hash);
+
         let mut unsigned_request = builder
             .uri(args.url.clone())
             .method(self.method().as_bytes())
-            .body(args.data.clone().unwrap_or("".to_string()))?;
+            .body(body.to_string())?;
 
         let identity = self.credentials().await?.into();
         let signing_params = v4::SigningParams::builder()
@@ -197,6 +204,12 @@ fn print_response_verbose(res: &reqwest::Response) {
         eprintln!("< {} {}", key.as_str(), value.to_str().unwrap())
     }
     eprintln!("<");
+}
+
+fn calc_sha256_hex_digest(body: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(body.as_bytes());
+    hex::encode(hasher.finalize_fixed())
 }
 
 #[cfg(test)]
@@ -337,8 +350,9 @@ mod tests {
                 fragment: None,
             },
             headers: {
+                "x-amz-content-sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
                 "x-amz-date": "20130524T000000Z",
-                "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/ap-northeast-1/execute-api/aws4_request, SignedHeaders=host;x-amz-date, Signature=3350cad4e732c60458fd6f31068a90a0179fcc63959c6891ccf3b7788b662c1d",
+                "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/ap-northeast-1/execute-api/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=e876da8a6b489efaa67800e5d2eea6033dc331edc9e412d00aed1287e19c055b",
             },
         }
         "#)
@@ -384,8 +398,9 @@ mod tests {
             },
             headers: {
                 "content-type": "application/json",
+                "x-amz-content-sha256": "be5bcd99c83a3d26855b358b82c9a77bb074e3d6c5e19b7a205e10cef1b3a421",
                 "x-amz-date": "20130524T000000Z",
-                "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/ap-northeast-1/execute-api/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=06cd3bf07213570b40e880f7c72ecded2ce70165134af7fc67a2c5ce21ea8b22",
+                "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/ap-northeast-1/execute-api/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=d8d2d96aab6a9cadbac2b27de4fca25c722bfc3c82fd0796f2dfe0ac07863b2a",
             },
         }
         "#)
