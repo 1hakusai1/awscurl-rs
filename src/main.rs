@@ -313,12 +313,13 @@ mod tests {
 
     #[tokio::test]
     async fn get_request() {
+        // Same as https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
         let args = Args {
-            url: "https://example.com".to_string(),
+            url: "https://examplebucket.s3.amazonaws.com/test.txt".to_string(),
             data: None,
             method: None,
-            header: vec![],
-            service: None,
+            header: vec!["Range: bytes=0-9".to_string()],
+            service: Some("s3".to_string()),
             region: None,
             profile: None,
             verbose: false,
@@ -326,7 +327,7 @@ mod tests {
         let config = generate_config(
             "AKIAIOSFODNN7EXAMPLE",
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-            Some("ap-northeast-1"),
+            Some("us-east-1"),
         );
         let time = Utc.with_ymd_and_hms(2013, 5, 24, 0, 0, 0).unwrap();
         let param = AwsCurlParam::new(args, config, time.into());
@@ -341,18 +342,19 @@ mod tests {
                 password: None,
                 host: Some(
                     Domain(
-                        "example.com",
+                        "examplebucket.s3.amazonaws.com",
                     ),
                 ),
                 port: None,
-                path: "/",
+                path: "/test.txt",
                 query: None,
                 fragment: None,
             },
             headers: {
+                "range": "bytes=0-9",
                 "x-amz-content-sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
                 "x-amz-date": "20130524T000000Z",
-                "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/ap-northeast-1/execute-api/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=e876da8a6b489efaa67800e5d2eea6033dc331edc9e412d00aed1287e19c055b",
+                "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=host;range;x-amz-content-sha256;x-amz-date, Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41",
             },
         }
         "#)
@@ -361,11 +363,14 @@ mod tests {
     #[tokio::test]
     async fn post_request_with_header() {
         let args = Args {
-            url: "https://example.com".to_string(),
-            data: Some(r#"{ "hoge": "fuga", "foo": "bar" }"#.to_string()),
-            method: Some("POST".to_string()),
-            header: vec!["content-type: application/json".to_string()],
-            service: None,
+            url: "https://examplebucket.s3.amazonaws.com/test$file.text".to_string(),
+            data: Some("Welcome to Amazon S3.".to_string()),
+            method: Some("PUT".to_string()),
+            header: vec![
+                "Date: Fri, 24 May 2013 00:00:00 GMT".to_string(),
+                "x-amz-storage-class: REDUCED_REDUNDANCY".to_string(),
+            ],
+            service: Some("s3".to_string()),
             region: None,
             profile: None,
             verbose: false,
@@ -373,14 +378,14 @@ mod tests {
         let config = generate_config(
             "AKIAIOSFODNN7EXAMPLE",
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-            Some("ap-northeast-1"),
+            Some("us-east-1"),
         );
         let time = Utc.with_ymd_and_hms(2013, 5, 24, 0, 0, 0).unwrap();
         let param = AwsCurlParam::new(args, config, time.into());
         let req = param.build_request().await.unwrap();
         assert_debug_snapshot!(req, @r#"
         Request {
-            method: POST,
+            method: PUT,
             url: Url {
                 scheme: "https",
                 cannot_be_a_base: false,
@@ -388,19 +393,20 @@ mod tests {
                 password: None,
                 host: Some(
                     Domain(
-                        "example.com",
+                        "examplebucket.s3.amazonaws.com",
                     ),
                 ),
                 port: None,
-                path: "/",
+                path: "/test$file.text",
                 query: None,
                 fragment: None,
             },
             headers: {
-                "content-type": "application/json",
-                "x-amz-content-sha256": "be5bcd99c83a3d26855b358b82c9a77bb074e3d6c5e19b7a205e10cef1b3a421",
+                "date": "Fri, 24 May 2013 00:00:00 GMT",
+                "x-amz-storage-class": "REDUCED_REDUNDANCY",
+                "x-amz-content-sha256": "44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072",
                 "x-amz-date": "20130524T000000Z",
-                "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/ap-northeast-1/execute-api/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=d8d2d96aab6a9cadbac2b27de4fca25c722bfc3c82fd0796f2dfe0ac07863b2a",
+                "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=date;host;x-amz-content-sha256;x-amz-date;x-amz-storage-class, Signature=98ad721746da40c64f1a55b78f14c238d841ea1380cd77a1b5971af0ece108bd",
             },
         }
         "#)
