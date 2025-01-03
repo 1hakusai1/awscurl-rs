@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    process::{self},
-    time::SystemTime,
-};
+use std::{collections::HashMap, process::ExitCode, time::SystemTime};
 
 use anyhow::{bail, Context};
 use aws_config::SdkConfig;
@@ -11,7 +7,8 @@ use aws_sigv4::{
     http_request::{sign, SignableBody, SignableRequest, SigningSettings},
     sign::v4,
 };
-use clap::Parser;
+use chrono::{DateTime, FixedOffset};
+use clap::{builder::ValueParser, Parser};
 use sha2::{digest::FixedOutput, Digest, Sha256};
 
 #[derive(Parser, Debug)]
@@ -45,18 +42,38 @@ struct Args {
 
     #[arg(short, long)]
     verbose: bool,
+
+    #[arg(long, hide = true)]
+    /// Print the request information instead of sending it
+    /// Only for internal use
+    dry_run: bool,
+
+    #[arg(long, hide = true,value_parser = ValueParser::new(parse_datetime))]
+    /// Fix the datetime
+    /// Only for internal use
+    datetime: Option<DateTime<FixedOffset>>,
+}
+
+fn parse_datetime(raw: &str) -> Result<DateTime<FixedOffset>, chrono::ParseError> {
+    DateTime::parse_from_rfc3339(raw)
 }
 
 struct AwsCurlParam {
     args: Args,
     config: SdkConfig,
-    time: SystemTime,
 }
 const DEFAULT_SERVICE: &str = "execute-api";
 
 impl AwsCurlParam {
-    fn new(args: Args, config: SdkConfig, time: SystemTime) -> Self {
-        Self { args, config, time }
+    fn new(args: Args, config: SdkConfig) -> Self {
+        Self { args, config }
+    }
+
+    fn time(&self) -> SystemTime {
+        self.args
+            .datetime
+            .map(SystemTime::from)
+            .unwrap_or(SystemTime::now())
     }
 
     fn service(&self) -> &str {
@@ -106,7 +123,7 @@ impl AwsCurlParam {
         Ok(config)
     }
 
-    async fn build_request(&self) -> anyhow::Result<reqwest::Request> {
+    async fn build_request(&self) -> anyhow::Result<http::Request<String>> {
         let args: &Args = &self.args;
         let mut builder = http::Request::builder();
         for (key, value) in self.headers()? {
@@ -118,7 +135,7 @@ impl AwsCurlParam {
         let body_hash = calc_sha256_hex_digest(body);
         builder = builder.header("x-amz-content-sha256", body_hash);
 
-        let mut unsigned_request = builder
+        let mut req = builder
             .uri(args.url.clone())
             .method(self.method().as_bytes())
             .body(body.to_string())?;
@@ -126,55 +143,54 @@ impl AwsCurlParam {
         let identity = self.credentials().await?.into();
         let signing_params = v4::SigningParams::builder()
             .identity(&identity)
-            .time(self.time)
+            .time(self.time())
             .settings(SigningSettings::default())
             .region(self.region()?)
             .name(self.service())
             .build()?
             .into();
         let signable_request = SignableRequest::new(
-            unsigned_request.method().as_str(),
-            unsigned_request.uri().to_string(),
-            unsigned_request
-                .headers()
+            req.method().as_str(),
+            req.uri().to_string(),
+            req.headers()
                 .iter()
                 .map(|(k, v)| (k.as_str(), std::str::from_utf8(v.as_bytes()).unwrap())),
-            SignableBody::Bytes(unsigned_request.body().as_bytes()),
+            SignableBody::Bytes(req.body().as_bytes()),
         )?;
         let (instruction, _signature) = sign(signable_request, &signing_params)?.into_parts();
 
-        instruction.apply_to_request_http1x(&mut unsigned_request);
-        let reqwest_req = unsigned_request.try_into()?;
-        Ok(reqwest_req)
+        instruction.apply_to_request_http1x(&mut req);
+        Ok(req)
     }
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> ExitCode {
     let status = inner().await.unwrap_or_else(|e| {
         eprintln!("{:?}", e);
-        process::exit(1)
+        ExitCode::FAILURE
     });
-    if !status.is_success() {
-        process::exit(1)
-    }
+    status
 }
 
-async fn inner() -> anyhow::Result<http::StatusCode> {
+async fn inner() -> anyhow::Result<ExitCode> {
     let args = Args::parse();
     let mut config_loader = aws_config::from_env();
     if let Some(profile) = &args.profile {
         config_loader = config_loader.profile_name(profile);
     }
     let config = config_loader.load().await;
-    let param = AwsCurlParam::new(args, config, SystemTime::now());
+    let param = AwsCurlParam::new(args, config);
 
-    let reqwest_req = param.build_request().await?;
+    let req = param.build_request().await?.try_into()?;
     if param.args.verbose {
-        print_request_verbose(&reqwest_req);
+        print_request_verbose(&req);
+    }
+    if param.args.dry_run {
+        return Ok(ExitCode::SUCCESS);
     }
 
-    let res = reqwest::Client::new().execute(reqwest_req).await?;
+    let res = reqwest::Client::new().execute(req).await?;
     if param.args.verbose {
         print_response_verbose(&res);
     }
@@ -182,7 +198,11 @@ async fn inner() -> anyhow::Result<http::StatusCode> {
     let status = res.status();
     let body = res.text().await?;
     println!("{}", body);
-    Ok(status)
+    if status.is_success() {
+        Ok(ExitCode::SUCCESS)
+    } else {
+        Ok(ExitCode::FAILURE)
+    }
 }
 
 fn print_request_verbose(req: &reqwest::Request) {
@@ -192,7 +212,10 @@ fn print_request_verbose(req: &reqwest::Request) {
         req.url().path(),
         req.version()
     );
-    for (key, value) in req.headers() {
+    let mut headers = req.headers().iter().collect::<Vec<_>>();
+    // Sort by header keys
+    headers.sort_by(|a, b| a.0.as_str().cmp(&b.0.as_str()));
+    for (key, value) in headers {
         eprintln!("> {} {}", key.as_str(), value.to_str().unwrap())
     }
     eprintln!(">");
@@ -215,12 +238,11 @@ fn calc_sha256_hex_digest(body: &str) -> String {
 #[cfg(test)]
 mod tests {
 
-    use std::{collections::HashMap, time::SystemTime};
+    use std::{collections::HashMap, process::Command};
 
     use aws_config::{Region, SdkConfig};
     use aws_credential_types::{provider::SharedCredentialsProvider, Credentials};
-    use chrono::{TimeZone, Utc};
-    use insta::assert_debug_snapshot;
+    use insta_cmd::{assert_cmd_snapshot, get_cargo_bin};
 
     use crate::{Args, AwsCurlParam};
 
@@ -252,8 +274,10 @@ mod tests {
             region: None,
             profile: None,
             verbose: false,
+            dry_run: false,
+            datetime: None,
         };
-        let param = AwsCurlParam::new(args, generate_config("", "", None), SystemTime::now());
+        let param = AwsCurlParam::new(args, generate_config("", "", None));
         assert_eq!(
             param.headers().unwrap(),
             HashMap::from([
@@ -274,8 +298,10 @@ mod tests {
             region: None,
             profile: None,
             verbose: false,
+            dry_run: false,
+            datetime: None,
         };
-        let param = AwsCurlParam::new(args, generate_config("", "", None), SystemTime::now());
+        let param = AwsCurlParam::new(args, generate_config("", "", None));
         assert_eq!(param.method(), "PUT")
     }
 
@@ -290,8 +316,10 @@ mod tests {
             region: None,
             profile: None,
             verbose: false,
+            dry_run: false,
+            datetime: None,
         };
-        let param = AwsCurlParam::new(args, generate_config("", "", None), SystemTime::now());
+        let param = AwsCurlParam::new(args, generate_config("", "", None));
         assert_eq!(param.method(), "GET")
     }
 
@@ -306,109 +334,74 @@ mod tests {
             region: None,
             profile: None,
             verbose: false,
+            dry_run: false,
+            datetime: None,
         };
-        let param = AwsCurlParam::new(args, generate_config("", "", None), SystemTime::now());
+        let param = AwsCurlParam::new(args, generate_config("", "", None));
         assert_eq!(param.method(), "POST")
     }
 
-    #[tokio::test]
-    async fn get_request() {
-        // Same as https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
-        let args = Args {
-            url: "https://examplebucket.s3.amazonaws.com/test.txt".to_string(),
-            data: None,
-            method: None,
-            header: vec!["Range: bytes=0-9".to_string()],
-            service: Some("s3".to_string()),
-            region: None,
-            profile: None,
-            verbose: false,
-        };
-        let config = generate_config(
-            "AKIAIOSFODNN7EXAMPLE",
+    static TEST_ENV: [(&str, &str); 3] = [
+        ("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE"),
+        (
+            "AWS_SECRET_ACCESS_KEY",
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-            Some("us-east-1"),
-        );
-        let time = Utc.with_ymd_and_hms(2013, 5, 24, 0, 0, 0).unwrap();
-        let param = AwsCurlParam::new(args, config, time.into());
-        let req = param.build_request().await.unwrap();
-        assert_debug_snapshot!(req, @r#"
-        Request {
-            method: GET,
-            url: Url {
-                scheme: "https",
-                cannot_be_a_base: false,
-                username: "",
-                password: None,
-                host: Some(
-                    Domain(
-                        "examplebucket.s3.amazonaws.com",
-                    ),
-                ),
-                port: None,
-                path: "/test.txt",
-                query: None,
-                fragment: None,
-            },
-            headers: {
-                "range": "bytes=0-9",
-                "x-amz-content-sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-                "x-amz-date": "20130524T000000Z",
-                "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=host;range;x-amz-content-sha256;x-amz-date, Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41",
-            },
-        }
-        "#)
+        ),
+        ("AWS_DEFAULT_REGION", "us-east-1"),
+    ];
+
+    static TEST_ARGS: [&str; 4] = [
+        "--dry-run",
+        "--verbose",
+        "--datetime",
+        "2013-05-24T00:00:00Z",
+    ];
+
+    #[test]
+    fn get_request() {
+        // Same as https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
+        assert_cmd_snapshot!(Command::new(get_cargo_bin("awscurl")).envs(TEST_ENV).args(TEST_ARGS).args([
+            "https://examplebucket.s3.amazonaws.com/test.txt",
+            "-H", "Range: bytes=0-9",
+            "--service", "s3",
+        ]), @r"
+        success: true
+        exit_code: 0
+        ----- stdout -----
+
+        ----- stderr -----
+        > GET /test.txt HTTP/1.1
+        > authorization AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=host;range;x-amz-content-sha256;x-amz-date, Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41
+        > range bytes=0-9
+        > x-amz-content-sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        > x-amz-date 20130524T000000Z
+        >
+        ");
     }
 
-    #[tokio::test]
-    async fn post_request_with_header() {
-        let args = Args {
-            url: "https://examplebucket.s3.amazonaws.com/test$file.text".to_string(),
-            data: Some("Welcome to Amazon S3.".to_string()),
-            method: Some("PUT".to_string()),
-            header: vec![
-                "Date: Fri, 24 May 2013 00:00:00 GMT".to_string(),
-                "x-amz-storage-class: REDUCED_REDUNDANCY".to_string(),
-            ],
-            service: Some("s3".to_string()),
-            region: None,
-            profile: None,
-            verbose: false,
-        };
-        let config = generate_config(
-            "AKIAIOSFODNN7EXAMPLE",
-            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-            Some("us-east-1"),
-        );
-        let time = Utc.with_ymd_and_hms(2013, 5, 24, 0, 0, 0).unwrap();
-        let param = AwsCurlParam::new(args, config, time.into());
-        let req = param.build_request().await.unwrap();
-        assert_debug_snapshot!(req, @r#"
-        Request {
-            method: PUT,
-            url: Url {
-                scheme: "https",
-                cannot_be_a_base: false,
-                username: "",
-                password: None,
-                host: Some(
-                    Domain(
-                        "examplebucket.s3.amazonaws.com",
-                    ),
-                ),
-                port: None,
-                path: "/test$file.text",
-                query: None,
-                fragment: None,
-            },
-            headers: {
-                "date": "Fri, 24 May 2013 00:00:00 GMT",
-                "x-amz-storage-class": "REDUCED_REDUNDANCY",
-                "x-amz-content-sha256": "44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072",
-                "x-amz-date": "20130524T000000Z",
-                "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=date;host;x-amz-content-sha256;x-amz-date;x-amz-storage-class, Signature=98ad721746da40c64f1a55b78f14c238d841ea1380cd77a1b5971af0ece108bd",
-            },
-        }
-        "#)
+    #[test]
+    fn post_request_with_header() {
+        // Same as https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
+        assert_cmd_snapshot!(Command::new(get_cargo_bin("awscurl")).envs(TEST_ENV).args(TEST_ARGS).args([
+            "https://examplebucket.s3.amazonaws.com/test$file.text",
+            "-X", "PUT",
+            "-H", "Date: Fri, 24 May 2013 00:00:00 GMT",
+            "-H", "x-amz-storage-class: REDUCED_REDUNDANCY",
+            "-d", "Welcome to Amazon S3.",
+            "--service", "s3",
+        ]), @r"
+        success: true
+        exit_code: 0
+        ----- stdout -----
+
+        ----- stderr -----
+        > PUT /test$file.text HTTP/1.1
+        > authorization AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=date;host;x-amz-content-sha256;x-amz-date;x-amz-storage-class, Signature=98ad721746da40c64f1a55b78f14c238d841ea1380cd77a1b5971af0ece108bd
+        > date Fri, 24 May 2013 00:00:00 GMT
+        > x-amz-content-sha256 44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072
+        > x-amz-date 20130524T000000Z
+        > x-amz-storage-class REDUCED_REDUNDANCY
+        >
+        ");
     }
 }
