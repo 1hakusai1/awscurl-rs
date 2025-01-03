@@ -118,7 +118,7 @@ impl AwsCurlParam {
         let body_hash = calc_sha256_hex_digest(body);
         builder = builder.header("x-amz-content-sha256", body_hash);
 
-        let mut unsigned_request = builder
+        let mut req = builder
             .uri(args.url.clone())
             .method(self.method().as_bytes())
             .body(body.to_string())?;
@@ -133,18 +133,17 @@ impl AwsCurlParam {
             .build()?
             .into();
         let signable_request = SignableRequest::new(
-            unsigned_request.method().as_str(),
-            unsigned_request.uri().to_string(),
-            unsigned_request
-                .headers()
+            req.method().as_str(),
+            req.uri().to_string(),
+            req.headers()
                 .iter()
                 .map(|(k, v)| (k.as_str(), std::str::from_utf8(v.as_bytes()).unwrap())),
-            SignableBody::Bytes(unsigned_request.body().as_bytes()),
+            SignableBody::Bytes(req.body().as_bytes()),
         )?;
         let (instruction, _signature) = sign(signable_request, &signing_params)?.into_parts();
 
-        instruction.apply_to_request_http1x(&mut unsigned_request);
-        Ok(unsigned_request)
+        instruction.apply_to_request_http1x(&mut req);
+        Ok(req)
     }
 }
 
@@ -168,12 +167,12 @@ async fn inner() -> anyhow::Result<http::StatusCode> {
     let config = config_loader.load().await;
     let param = AwsCurlParam::new(args, config, SystemTime::now());
 
-    let reqwest_req = param.build_request().await?.try_into()?;
+    let req = param.build_request().await?.try_into()?;
     if param.args.verbose {
-        print_request_verbose(&reqwest_req);
+        print_request_verbose(&req);
     }
 
-    let res = reqwest::Client::new().execute(reqwest_req).await?;
+    let res = reqwest::Client::new().execute(req).await?;
     if param.args.verbose {
         print_response_verbose(&res);
     }
