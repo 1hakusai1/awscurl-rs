@@ -106,7 +106,7 @@ impl AwsCurlParam {
         Ok(config)
     }
 
-    async fn build_request(&self) -> anyhow::Result<reqwest::Request> {
+    async fn build_request(&self) -> anyhow::Result<http::Request<String>> {
         let args: &Args = &self.args;
         let mut builder = http::Request::builder();
         for (key, value) in self.headers()? {
@@ -144,8 +144,7 @@ impl AwsCurlParam {
         let (instruction, _signature) = sign(signable_request, &signing_params)?.into_parts();
 
         instruction.apply_to_request_http1x(&mut unsigned_request);
-        let reqwest_req = unsigned_request.try_into()?;
-        Ok(reqwest_req)
+        Ok(unsigned_request)
     }
 }
 
@@ -169,7 +168,7 @@ async fn inner() -> anyhow::Result<http::StatusCode> {
     let config = config_loader.load().await;
     let param = AwsCurlParam::new(args, config, SystemTime::now());
 
-    let reqwest_req = param.build_request().await?;
+    let reqwest_req = param.build_request().await?.try_into()?;
     if param.args.verbose {
         print_request_verbose(&reqwest_req);
     }
