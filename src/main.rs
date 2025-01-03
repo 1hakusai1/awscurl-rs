@@ -212,7 +212,10 @@ fn print_request_verbose(req: &reqwest::Request) {
         req.url().path(),
         req.version()
     );
-    for (key, value) in req.headers() {
+    let mut headers = req.headers().iter().collect::<Vec<_>>();
+    // Sort by header keys
+    headers.sort_by(|a, b| a.0.as_str().cmp(&b.0.as_str()));
+    for (key, value) in headers {
         eprintln!("> {} {}", key.as_str(), value.to_str().unwrap())
     }
     eprintln!(">");
@@ -361,7 +364,19 @@ mod tests {
             "https://examplebucket.s3.amazonaws.com/test.txt",
             "-H", "Range: bytes=0-9",
             "--service", "s3",
-        ]), @"");
+        ]), @r"
+        success: true
+        exit_code: 0
+        ----- stdout -----
+
+        ----- stderr -----
+        > GET /test.txt HTTP/1.1
+        > authorization AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=host;range;x-amz-content-sha256;x-amz-date, Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41
+        > range bytes=0-9
+        > x-amz-content-sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        > x-amz-date 20130524T000000Z
+        >
+        ");
     }
 
     #[test]
@@ -374,6 +389,19 @@ mod tests {
             "-H", "x-amz-storage-class: REDUCED_REDUNDANCY",
             "-d", "Welcome to Amazon S3.",
             "--service", "s3",
-        ]), @"");
+        ]), @r"
+        success: true
+        exit_code: 0
+        ----- stdout -----
+
+        ----- stderr -----
+        > PUT /test$file.text HTTP/1.1
+        > authorization AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=date;host;x-amz-content-sha256;x-amz-date;x-amz-storage-class, Signature=98ad721746da40c64f1a55b78f14c238d841ea1380cd77a1b5971af0ece108bd
+        > date Fri, 24 May 2013 00:00:00 GMT
+        > x-amz-content-sha256 44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072
+        > x-amz-date 20130524T000000Z
+        > x-amz-storage-class REDUCED_REDUNDANCY
+        >
+        ");
     }
 }
