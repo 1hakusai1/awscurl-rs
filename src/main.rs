@@ -7,7 +7,8 @@ use aws_sigv4::{
     http_request::{sign, SignableBody, SignableRequest, SigningSettings},
     sign::v4,
 };
-use clap::Parser;
+use chrono::{DateTime, FixedOffset};
+use clap::{builder::ValueParser, Parser};
 use sha2::{digest::FixedOutput, Digest, Sha256};
 
 #[derive(Parser, Debug)]
@@ -41,18 +42,38 @@ struct Args {
 
     #[arg(short, long)]
     verbose: bool,
+
+    #[arg(long, hide = true)]
+    /// Print the request information instead of sending it
+    /// Only for internal use
+    dry_run: bool,
+
+    #[arg(long, hide = true,value_parser = ValueParser::new(parse_datetime))]
+    /// Fix the datetime
+    /// Only for internal use
+    datetime: Option<DateTime<FixedOffset>>,
+}
+
+fn parse_datetime(raw: &str) -> Result<DateTime<FixedOffset>, chrono::ParseError> {
+    DateTime::parse_from_rfc3339(raw)
 }
 
 struct AwsCurlParam {
     args: Args,
     config: SdkConfig,
-    time: SystemTime,
 }
 const DEFAULT_SERVICE: &str = "execute-api";
 
 impl AwsCurlParam {
-    fn new(args: Args, config: SdkConfig, time: SystemTime) -> Self {
-        Self { args, config, time }
+    fn new(args: Args, config: SdkConfig) -> Self {
+        Self { args, config }
+    }
+
+    fn time(&self) -> SystemTime {
+        self.args
+            .datetime
+            .map(SystemTime::from)
+            .unwrap_or(SystemTime::now())
     }
 
     fn service(&self) -> &str {
@@ -122,7 +143,7 @@ impl AwsCurlParam {
         let identity = self.credentials().await?.into();
         let signing_params = v4::SigningParams::builder()
             .identity(&identity)
-            .time(self.time)
+            .time(self.time())
             .settings(SigningSettings::default())
             .region(self.region()?)
             .name(self.service())
@@ -159,7 +180,7 @@ async fn inner() -> anyhow::Result<ExitCode> {
         config_loader = config_loader.profile_name(profile);
     }
     let config = config_loader.load().await;
-    let param = AwsCurlParam::new(args, config, SystemTime::now());
+    let param = AwsCurlParam::new(args, config);
 
     let req = param.build_request().await?.try_into()?;
     if param.args.verbose {
@@ -169,6 +190,9 @@ async fn inner() -> anyhow::Result<ExitCode> {
     let res = reqwest::Client::new().execute(req).await?;
     if param.args.verbose {
         print_response_verbose(&res);
+    }
+    if param.args.dry_run {
+        return Ok(ExitCode::SUCCESS);
     }
 
     let status = res.status();
@@ -211,11 +235,10 @@ fn calc_sha256_hex_digest(body: &str) -> String {
 #[cfg(test)]
 mod tests {
 
-    use std::{collections::HashMap, time::SystemTime};
+    use std::collections::HashMap;
 
     use aws_config::{Region, SdkConfig};
     use aws_credential_types::{provider::SharedCredentialsProvider, Credentials};
-    use chrono::{TimeZone, Utc};
     use insta::assert_debug_snapshot;
 
     use crate::{Args, AwsCurlParam};
@@ -248,8 +271,10 @@ mod tests {
             region: None,
             profile: None,
             verbose: false,
+            dry_run: false,
+            datetime: None,
         };
-        let param = AwsCurlParam::new(args, generate_config("", "", None), SystemTime::now());
+        let param = AwsCurlParam::new(args, generate_config("", "", None));
         assert_eq!(
             param.headers().unwrap(),
             HashMap::from([
@@ -270,8 +295,10 @@ mod tests {
             region: None,
             profile: None,
             verbose: false,
+            dry_run: false,
+            datetime: None,
         };
-        let param = AwsCurlParam::new(args, generate_config("", "", None), SystemTime::now());
+        let param = AwsCurlParam::new(args, generate_config("", "", None));
         assert_eq!(param.method(), "PUT")
     }
 
@@ -286,8 +313,10 @@ mod tests {
             region: None,
             profile: None,
             verbose: false,
+            dry_run: false,
+            datetime: None,
         };
-        let param = AwsCurlParam::new(args, generate_config("", "", None), SystemTime::now());
+        let param = AwsCurlParam::new(args, generate_config("", "", None));
         assert_eq!(param.method(), "GET")
     }
 
@@ -302,8 +331,10 @@ mod tests {
             region: None,
             profile: None,
             verbose: false,
+            dry_run: false,
+            datetime: None,
         };
-        let param = AwsCurlParam::new(args, generate_config("", "", None), SystemTime::now());
+        let param = AwsCurlParam::new(args, generate_config("", "", None));
         assert_eq!(param.method(), "POST")
     }
 
@@ -319,14 +350,16 @@ mod tests {
             region: None,
             profile: None,
             verbose: false,
+            dry_run: false,
+            datetime: None,
         };
         let config = generate_config(
             "AKIAIOSFODNN7EXAMPLE",
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
             Some("us-east-1"),
         );
-        let time = Utc.with_ymd_and_hms(2013, 5, 24, 0, 0, 0).unwrap();
-        let param = AwsCurlParam::new(args, config, time.into());
+        // let time = Utc.with_ymd_and_hms(2013, 5, 24, 0, 0, 0).unwrap();
+        let param = AwsCurlParam::new(args, config);
         let req = param.build_request().await.unwrap();
         assert_debug_snapshot!(req, @r#"
         Request {
@@ -370,14 +403,16 @@ mod tests {
             region: None,
             profile: None,
             verbose: false,
+            dry_run: false,
+            datetime: None,
         };
         let config = generate_config(
             "AKIAIOSFODNN7EXAMPLE",
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
             Some("us-east-1"),
         );
-        let time = Utc.with_ymd_and_hms(2013, 5, 24, 0, 0, 0).unwrap();
-        let param = AwsCurlParam::new(args, config, time.into());
+        // let time = Utc.with_ymd_and_hms(2013, 5, 24, 0, 0, 0).unwrap();
+        let param = AwsCurlParam::new(args, config);
         let req = param.build_request().await.unwrap();
         assert_debug_snapshot!(req, @r#"
         Request {

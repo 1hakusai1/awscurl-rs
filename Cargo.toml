@@ -18,11 +18,11 @@ http = "1.2.0"
 reqwest = "0.12.9"
 sha2 = "0.10.8"
 tokio = { version = "1.42.0", features = ["full"] }
+chrono = "0.4.39"
 
 [profile.release]
 strip = true 
 lto = true
 
 [dev-dependencies]
-chrono = "0.4.39"
 insta = "1.41.1"
