@@ -26,3 +26,4 @@ lto = true
 
 [dev-dependencies]
 insta = "1.41.1"
+insta-cmd = "0.6.0"

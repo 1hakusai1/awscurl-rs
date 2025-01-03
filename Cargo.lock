@@ -418,6 +418,7 @@ dependencies = [
  "hex",
  "http 1.2.0",
  "insta",
+ "insta-cmd",
  "reqwest",
  "sha2",
  "tokio",
@@ -1215,7 +1216,19 @@ dependencies = [
  "console",
  "lazy_static",
  "linked-hash-map",
+ "serde",
  "similar",
+]
+
+[[package]]
+name = "insta-cmd"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffeeefa927925cced49ccb01bf3e57c9d4cd132df21e576eb9415baeab2d3de6"
+dependencies = [
+ "insta",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

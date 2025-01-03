@@ -186,13 +186,13 @@ async fn inner() -> anyhow::Result<ExitCode> {
     if param.args.verbose {
         print_request_verbose(&req);
     }
+    if param.args.dry_run {
+        return Ok(ExitCode::SUCCESS);
+    }
 
     let res = reqwest::Client::new().execute(req).await?;
     if param.args.verbose {
         print_response_verbose(&res);
-    }
-    if param.args.dry_run {
-        return Ok(ExitCode::SUCCESS);
     }
 
     let status = res.status();
@@ -235,11 +235,11 @@ fn calc_sha256_hex_digest(body: &str) -> String {
 #[cfg(test)]
 mod tests {
 
-    use std::collections::HashMap;
+    use std::{collections::HashMap, process::Command};
 
     use aws_config::{Region, SdkConfig};
     use aws_credential_types::{provider::SharedCredentialsProvider, Credentials};
-    use insta::assert_debug_snapshot;
+    use insta_cmd::{assert_cmd_snapshot, get_cargo_bin};
 
     use crate::{Args, AwsCurlParam};
 
@@ -338,108 +338,42 @@ mod tests {
         assert_eq!(param.method(), "POST")
     }
 
-    #[tokio::test]
-    async fn get_request() {
-        // Same as https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
-        let args = Args {
-            url: "https://examplebucket.s3.amazonaws.com/test.txt".to_string(),
-            data: None,
-            method: None,
-            header: vec!["Range: bytes=0-9".to_string()],
-            service: Some("s3".to_string()),
-            region: None,
-            profile: None,
-            verbose: false,
-            dry_run: false,
-            datetime: None,
-        };
-        let config = generate_config(
-            "AKIAIOSFODNN7EXAMPLE",
+    static TEST_ENV: [(&str, &str); 3] = [
+        ("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE"),
+        (
+            "AWS_SECRET_ACCESS_KEY",
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-            Some("us-east-1"),
-        );
-        // let time = Utc.with_ymd_and_hms(2013, 5, 24, 0, 0, 0).unwrap();
-        let param = AwsCurlParam::new(args, config);
-        let req = param.build_request().await.unwrap();
-        assert_debug_snapshot!(req, @r#"
-        Request {
-            method: GET,
-            url: Url {
-                scheme: "https",
-                cannot_be_a_base: false,
-                username: "",
-                password: None,
-                host: Some(
-                    Domain(
-                        "examplebucket.s3.amazonaws.com",
-                    ),
-                ),
-                port: None,
-                path: "/test.txt",
-                query: None,
-                fragment: None,
-            },
-            headers: {
-                "range": "bytes=0-9",
-                "x-amz-content-sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-                "x-amz-date": "20130524T000000Z",
-                "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=host;range;x-amz-content-sha256;x-amz-date, Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41",
-            },
-        }
-        "#)
+        ),
+        ("AWS_DEFAULT_REGION", "us-east-1"),
+    ];
+
+    static TEST_ARGS: [&str; 4] = [
+        "--dry-run",
+        "--verbose",
+        "--datetime",
+        "2013-05-24T00:00:00Z",
+    ];
+
+    #[test]
+    fn get_request() {
+        // Same as https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
+        assert_cmd_snapshot!(Command::new(get_cargo_bin("awscurl")).envs(TEST_ENV).args(TEST_ARGS).args([
+            "https://examplebucket.s3.amazonaws.com/test.txt",
+            "-H", "Range: bytes=0-9",
+            "--service", "s3",
+        ]), @"");
     }
 
-    #[tokio::test]
-    async fn post_request_with_header() {
-        let args = Args {
-            url: "https://examplebucket.s3.amazonaws.com/test$file.text".to_string(),
-            data: Some("Welcome to Amazon S3.".to_string()),
-            method: Some("PUT".to_string()),
-            header: vec![
-                "Date: Fri, 24 May 2013 00:00:00 GMT".to_string(),
-                "x-amz-storage-class: REDUCED_REDUNDANCY".to_string(),
-            ],
-            service: Some("s3".to_string()),
-            region: None,
-            profile: None,
-            verbose: false,
-            dry_run: false,
-            datetime: None,
-        };
-        let config = generate_config(
-            "AKIAIOSFODNN7EXAMPLE",
-            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-            Some("us-east-1"),
-        );
-        // let time = Utc.with_ymd_and_hms(2013, 5, 24, 0, 0, 0).unwrap();
-        let param = AwsCurlParam::new(args, config);
-        let req = param.build_request().await.unwrap();
-        assert_debug_snapshot!(req, @r#"
-        Request {
-            method: PUT,
-            url: Url {
-                scheme: "https",
-                cannot_be_a_base: false,
-                username: "",
-                password: None,
-                host: Some(
-                    Domain(
-                        "examplebucket.s3.amazonaws.com",
-                    ),
-                ),
-                port: None,
-                path: "/test$file.text",
-                query: None,
-                fragment: None,
-            },
-            headers: {
-                "date": "Fri, 24 May 2013 00:00:00 GMT",
-                "x-amz-storage-class": "REDUCED_REDUNDANCY",
-                "x-amz-content-sha256": "44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072",
-                "x-amz-date": "20130524T000000Z",
-                "authorization": "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=date;host;x-amz-content-sha256;x-amz-date;x-amz-storage-class, Signature=98ad721746da40c64f1a55b78f14c238d841ea1380cd77a1b5971af0ece108bd",
-            },
-        }
-        "#)
+    #[test]
+    fn post_request_with_header() {
+        // Same as https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-header-based-auth.html
+        assert_cmd_snapshot!(Command::new(get_cargo_bin("awscurl")).envs(TEST_ENV).args(TEST_ARGS).args([
+            "https://examplebucket.s3.amazonaws.com/test$file.text",
+            "-X", "PUT",
+            "-H", "Date: Fri, 24 May 2013 00:00:00 GMT",
+            "-H", "x-amz-storage-class: REDUCED_REDUNDANCY",
+            "-d", "Welcome to Amazon S3.",
+            "--service", "s3",
+        ]), @"");
     }
 }
