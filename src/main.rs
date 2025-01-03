@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    process::{self},
-    time::SystemTime,
-};
+use std::{collections::HashMap, process::ExitCode, time::SystemTime};
 
 use anyhow::{bail, Context};
 use aws_config::SdkConfig;
@@ -148,17 +144,15 @@ impl AwsCurlParam {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> ExitCode {
     let status = inner().await.unwrap_or_else(|e| {
         eprintln!("{:?}", e);
-        process::exit(1)
+        ExitCode::FAILURE
     });
-    if !status.is_success() {
-        process::exit(1)
-    }
+    status
 }
 
-async fn inner() -> anyhow::Result<http::StatusCode> {
+async fn inner() -> anyhow::Result<ExitCode> {
     let args = Args::parse();
     let mut config_loader = aws_config::from_env();
     if let Some(profile) = &args.profile {
@@ -180,7 +174,11 @@ async fn inner() -> anyhow::Result<http::StatusCode> {
     let status = res.status();
     let body = res.text().await?;
     println!("{}", body);
-    Ok(status)
+    if status.is_success() {
+        Ok(ExitCode::SUCCESS)
+    } else {
+        Ok(ExitCode::FAILURE)
+    }
 }
 
 fn print_request_verbose(req: &reqwest::Request) {
