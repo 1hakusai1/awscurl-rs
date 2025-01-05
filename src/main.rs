@@ -8,11 +8,12 @@ use aws_sigv4::{
     sign::v4,
 };
 use chrono::{DateTime, FixedOffset};
-use clap::{builder::ValueParser, Parser};
+use clap::{builder::ValueParser, CommandFactory, Parser};
+use clap_complete_command::Shell;
 use sha2::{digest::FixedOutput, Digest, Sha256};
 
 #[derive(Parser, Debug)]
-#[command(version)]
+#[command(version, name = "awscurl")]
 struct Args {
     url: String,
 
@@ -52,6 +53,9 @@ struct Args {
     /// Fix the datetime
     /// Only for internal use
     datetime: Option<DateTime<FixedOffset>>,
+
+    #[arg(long, hide = true)]
+    generate_shell_completion: Option<Shell>,
 }
 
 fn parse_datetime(raw: &str) -> Result<DateTime<FixedOffset>, chrono::ParseError> {
@@ -175,6 +179,13 @@ async fn main() -> ExitCode {
 
 async fn inner() -> anyhow::Result<ExitCode> {
     let args = Args::parse();
+
+    // Print shell completions and exit 0.
+    if let Some(shell) = args.generate_shell_completion {
+        shell.generate(&mut Args::command(), &mut std::io::stdout());
+        return Ok(ExitCode::SUCCESS);
+    }
+
     let mut config_loader = aws_config::from_env();
     if let Some(profile) = &args.profile {
         config_loader = config_loader.profile_name(profile);
@@ -276,6 +287,7 @@ mod tests {
             verbose: false,
             dry_run: false,
             datetime: None,
+            generate_shell_completion: None,
         };
         let param = AwsCurlParam::new(args, generate_config("", "", None));
         assert_eq!(
@@ -300,6 +312,7 @@ mod tests {
             verbose: false,
             dry_run: false,
             datetime: None,
+            generate_shell_completion: None,
         };
         let param = AwsCurlParam::new(args, generate_config("", "", None));
         assert_eq!(param.method(), "PUT")
@@ -318,6 +331,7 @@ mod tests {
             verbose: false,
             dry_run: false,
             datetime: None,
+            generate_shell_completion: None,
         };
         let param = AwsCurlParam::new(args, generate_config("", "", None));
         assert_eq!(param.method(), "GET")
@@ -336,6 +350,7 @@ mod tests {
             verbose: false,
             dry_run: false,
             datetime: None,
+            generate_shell_completion: None,
         };
         let param = AwsCurlParam::new(args, generate_config("", "", None));
         assert_eq!(param.method(), "POST")
