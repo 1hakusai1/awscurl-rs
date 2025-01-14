@@ -170,11 +170,10 @@ impl AwsCurlParam {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let status = inner().await.unwrap_or_else(|e| {
+    inner().await.unwrap_or_else(|e| {
         eprintln!("{:?}", e);
         ExitCode::FAILURE
-    });
-    status
+    })
 }
 
 async fn inner() -> anyhow::Result<ExitCode> {
@@ -225,7 +224,7 @@ fn print_request_verbose(req: &reqwest::Request) {
     );
     let mut headers = req.headers().iter().collect::<Vec<_>>();
     // Sort by header keys
-    headers.sort_by(|a, b| a.0.as_str().cmp(&b.0.as_str()));
+    headers.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
     for (key, value) in headers {
         eprintln!("> {} {}", key.as_str(), value.to_str().unwrap())
     }
