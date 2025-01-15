@@ -52,6 +52,18 @@ awscurl https://example.com --profile assume-role-profile
 ```
 
 ## Example
+S3 list bucket content
+```shell
+awscurl --service s3 'https://hakusai-test-bucket.s3.amazonaws.com' | tidy -xml -iq
+<?xml version="1.0" encoding="utf-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Name>hakusai-test-bucket</Name>
+  <Prefix></Prefix>
+  <Marker></Marker>
+  <MaxKeys>1000</MaxKeys>
+  <IsTruncated>false</IsTruncated>
+</ListBucketResult>
+```
 
 Most of the options are the same as those in curl.
 
